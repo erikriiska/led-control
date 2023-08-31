@@ -1,13 +1,13 @@
 #include "FastLED.h"
 
-#define NUM_LEDS 8
+#define NUM_LEDS 16
 #define DATA_PIN 3
 
 CRGBArray<NUM_LEDS> leds;
 CRGBArray<3> colors;
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   delay(2000);
   FastLED.addLeds<PL9823, DATA_PIN, RGB>(leds, NUM_LEDS);
   for (int i = 0; i < NUM_LEDS; i++) {
