@@ -24,6 +24,22 @@ for i in range(0, p.get_device_count()):
     print ( str(info["index"]) +  ": \t %s \n \t %s \n" % (info["name"], p.get_host_api_info_by_index(info["hostApi"])["name"]))
     pass
 
+def get_splits(d):
+    l = len(d)
+    vals = [d[k] for k in d]
+    s = sum(vals)/8
+    i = 0
+    f = 0
+    rtn = []
+    while i < l:
+        f += d[i]
+        if f > s:
+            rtn.append(i - 1)
+            f = 0
+        i += 1
+    return rtn
+
+totals = {}
 #ToDo change to your device ID
 device_id = 5
 device_info = p.get_device_info_by_index(device_id)
@@ -42,9 +58,12 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
     base_hue = 0
     print('\nRecording', device_id, '...\n')
     m = 1
-    s = [0.0] * 4
+    s = [0.0] * 8
     l, r = [0.0] * 4, [0.0] * 4
-
+    totals = {}
+    for i in range(chunk*2):
+        totals[i] = 0
+    splits = [173, 714, 3634, 4096, 4559, 7479, 8018] # [250, 750, 1750, 3750, 6000, 7200, 8100]
     try:
         while True:
             while not stream.get_read_available():
@@ -52,37 +71,44 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
             data = stream.read(chunk)
             data_np = np.frombuffer(data, dtype='h')
 
-            # data_np = np.abs(np.fft.fft(data_np, axis=0))
-            # d = [
-            #         (np.sum(data_np[0:512]))**2,
-            #         (np.sum(data_np[512:4096]))**2,
-            #         (np.sum(data_np[4096:7770]))**2,
-            #         (np.sum(data_np[7770:]))**2
+            data_np = np.abs(np.fft.fft(data_np, axis=0))
+            for i, v in enumerate(data_np):
+                totals[i] += v
+            d = [
+                    (np.sum(data_np[0:splits[0]]))**2,
+                    (np.sum(data_np[splits[0]:splits[1]]))**2,
+                    (np.sum(data_np[splits[1]:splits[2]]))**2,
+                    (np.sum(data_np[splits[2]:splits[3]]))**2,
+                    (np.sum(data_np[splits[3]:splits[4]]))**2,
+                    (np.sum(data_np[splits[4]:splits[5]]))**2,
+                    (np.sum(data_np[splits[5]:splits[6]]))**2,
+                    (np.sum(data_np[splits[6]:]))**2,
+                ]
+            m = max(m, np.max(d))
+            s = [max((s[i] * 0.05 +d[i]*0.95), d[i]) for i in range(8)]
+
+            # l_channel = data_np[0::2]
+            # # print(l_channel)
+            # r_channel = data_np[1::2]
+            # l_channel = np.abs(np.fft.fft(l_channel, axis=0))
+            # dl = [
+            #         (np.sum(l_channel[0:256]))**1.2,
+            #         (np.sum(l_channel[256:2048]))**1.2,
+            #         (np.sum(l_channel[2048:3850]))**1.2,
+            #         (np.sum(l_channel[3850:]))**1.2
             #     ]
-            # m = max(m, np.max(d))
-            # s = [max((s[i] * 0.05 +d[i]*0.95), d[i]) for i in range(4)]
+            # m = max(m, np.max(dl))
+            # l = [max((l[i] * 0.05 + dl[i]*0.95), dl[i]) for i in range(4)]
 
-            l_channel = data_np[0::2]
-            r_channel = data_np[1::2]
-            l_channel = np.abs(np.fft.fft(l_channel, axis=0))
-            dl = [
-                    (np.sum(l_channel[0:256]))**2,
-                    (np.sum(l_channel[256:2048]))**2,
-                    (np.sum(l_channel[2048:3850]))**2,
-                    (np.sum(l_channel[3850:]))**2
-                ]
-            m = max(m, np.max(dl))
-            l = [max((l[i] * 0.05 + dl[i]*0.95), dl[i]) for i in range(4)]
-
-            r_channel = np.abs(np.fft.fft(r_channel, axis=0))
-            dr = [
-                    (np.sum(r_channel[0:256]))**2,
-                    (np.sum(r_channel[256:2048]))**2,
-                    (np.sum(r_channel[2048:3850]))**2,
-                    (np.sum(r_channel[3850:]))**2
-                ]
-            m = max(m, np.max(dr))
-            r = [max((r[i] * 0.05 + dr[i]*0.95), dr[i]) for i in range(4)]
+            # r_channel = np.abs(np.fft.fft(r_channel, axis=0))
+            # dr = [
+            #         (np.sum(r_channel[0:256]))**1.2,
+            #         (np.sum(r_channel[256:2048]))**1.2,
+            #         (np.sum(r_channel[2048:3850]))**1.2,
+            #         (np.sum(r_channel[3850:]))**1.2
+            #     ]
+            # m = max(m, np.max(dr))
+            # r = [max((r[i] * 0.05 + dr[i]*0.95), dr[i]) for i in range(4)]
             # print(len(r_channel))
             
             # for i in range(4)[::-1]:
@@ -94,12 +120,12 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
             # l = [colorsys.hsv_to_rgb((base_hue + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(l)]
             # r = [colorsys.hsv_to_rgb((base_hue + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(r)]
             b = bytearray()
-            for x in [colorsys.hsv_to_rgb((base_hue + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(r[0:4])]:
+            for x in [colorsys.hsv_to_rgb((base_hue + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(s)]:
                 for rgb in x:
                     b.append(int(64*rgb))
-            for x in [colorsys.hsv_to_rgb((base_hue + 0.5 + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(l[0:4])][::-1]:
-                for rgb in x:
-                    b.append(int(64*rgb))
+            # for x in [colorsys.hsv_to_rgb((base_hue + 0.5 + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(l[0:4])][::-1]:
+            #     for rgb in x:
+            #         b.append(int(64*rgb))
             if ser.writable():
                 ser.write(b)
             base_hue += 1.0/500
@@ -107,3 +133,4 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
         # Stop and close the stream 
         stream.stop_stream()
         stream.close()
+        print(get_splits(totals))
