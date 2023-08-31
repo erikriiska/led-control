@@ -64,6 +64,7 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
     # totals = {}
     # for i in range(chunk*2):
     #     totals[i] = 0
+    bleh = lambda x : x if x > 10 else 0
     splits = [0, 8, 16, 32, 64, 128, 256, 512, 1600] # [173, 714, 3634, 4096, 4559, 7479, 8018] # [250, 750, 1750, 3750, 6000, 7200, 8100]
     try:
         while True:
@@ -79,9 +80,10 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
             # print(np.fft.fftfreq(8, data_np))
             # data_np 
             data_np = np.abs(data_np)
+            data_np[data_np < 20] = 0
             # data_np = list(map(lambda x: x if x > 10 else 0, data_np))
             data_np = np.cumsum(data_np)
-            d = [data_np[splits[i+1]]-data_np[splits[i]] + data_np[4095-splits[i]] - data_np[4095-splits[i+1]] for i in range(8)]
+            d = [(data_np[splits[i+1]]-data_np[splits[i]] + data_np[4095-splits[i]] - data_np[4095-splits[i+1]])**2 for i in range(8)]
             # d = [
             #         (np.sum(data_np[:splits[0]],         )  + np.sum(data_np[4096-  splits[0]:]))**2,
             #         (np.sum(data_np[splits[0]:splits[1]])  + np.sum(data_np[4096 - splits[1]:4096 - splits[0]]))**2,
@@ -94,7 +96,7 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
             #     ]
             m = max(m, np.max(d))
             
-            s = [max((s[i] * 0.8 +d[i]*0.2), d[i]) for i in range(8)]
+            s = [max((s[i] * 0.7 +d[i]*0.3), d[i]) for i in range(8)]
 
             # l_channel = data_np[0::2]
             # # print(l_channel)
