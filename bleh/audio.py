@@ -10,10 +10,10 @@ def remap(i):
         return i
     return 7 - i
 
-chunk = 1024 * 4 # Record in chunks of 1024 samples
+chunk = 1024 * 2 # Record in chunks of 1024 samples
 sample_format = pyaudio.paInt16
 channels = 2
-fs = 1024 * 16 * 4  # samples per second
+fs = 44100  # samples per second
 
 p = pyaudio.PyAudio()  # Create an interface to PortAudio
 
@@ -27,7 +27,7 @@ for i in range(0, p.get_device_count()):
 def get_splits(d):
     l = len(d)
     vals = [d[k] for k in d]
-    s = sum(vals)/8
+    s = sum(vals)/16
     i = 0
     f = 0
     rtn = []
@@ -39,12 +39,13 @@ def get_splits(d):
         i += 1
     return rtn
 
-totals = {}
+# totals = {}
 #ToDo change to your device ID
-device_id = 5
+device_id = 3
 device_info = p.get_device_info_by_index(device_id)
 # channels = device_info["maxInputChannels"] if (device_info["maxOutputChannels"] < device_info["maxInputChannels"]) else device_info["maxOutputChannels"]
 # https://people.csail.mit.edu/hubert/pyaudio/docs/#pyaudio.Stream.__init__
+# if "your mom":
 with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser:
     time.sleep(5)
     stream = p.open(format=sample_format,
@@ -60,32 +61,36 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
     m = 1
     s = [0.0] * 8
     l, r = [0.0] * 4, [0.0] * 4
-    totals = {}
-    for i in range(chunk*2):
-        totals[i] = 0
-    splits = [173, 714, 3634, 4096, 4559, 7479, 8018] # [250, 750, 1750, 3750, 6000, 7200, 8100]
+    # totals = {}
+    # for i in range(chunk*2):
+    #     totals[i] = 0
+    splits = [8, 16, 32, 64, 128, 256, 512, 1024] # [173, 714, 3634, 4096, 4559, 7479, 8018] # [250, 750, 1750, 3750, 6000, 7200, 8100]
     try:
         while True:
             while not stream.get_read_available():
                 continue
             data = stream.read(chunk)
             data_np = np.frombuffer(data, dtype='h')
-
-            data_np = np.abs(np.fft.fft(data_np, axis=0))
-            for i, v in enumerate(data_np):
-                totals[i] += v
+            # print((data_np[0]))
+            # print(np.fft.fftfreq(data_np))
+            data_np = (np.fft.fft(data_np, axis=0))
+            # print(np.angle(data_np))
+            # print(np.fft.fftfreq(8, data_np))
+            # data_np 
+            data_np = np.abs(data_np)
             d = [
-                    (np.sum(data_np[0:splits[0]]))**2,
-                    (np.sum(data_np[splits[0]:splits[1]]))**2,
-                    (np.sum(data_np[splits[1]:splits[2]]))**2,
-                    (np.sum(data_np[splits[2]:splits[3]]))**2,
-                    (np.sum(data_np[splits[3]:splits[4]]))**2,
-                    (np.sum(data_np[splits[4]:splits[5]]))**2,
-                    (np.sum(data_np[splits[5]:splits[6]]))**2,
-                    (np.sum(data_np[splits[6]:]))**2,
+                    np.abs(np.sum(data_np[:splits[0]]         )  + np.sum(data_np[4096-  splits[0]:]))**2,
+                    np.abs(np.sum(data_np[splits[0]:splits[1]])  + np.sum(data_np[4096 - splits[1]:4096 - splits[0]]))**2,
+                    np.abs(np.sum(data_np[splits[1]:splits[2]])  + np.sum(data_np[4096 - splits[2]:4096 - splits[1]]))**2,
+                    np.abs(np.sum(data_np[splits[2]:splits[3]])  + np.sum(data_np[4096 - splits[3]:4096 - splits[2]]))**2,
+                    np.abs(np.sum(data_np[splits[3]:splits[4]])  + np.sum(data_np[4096 - splits[4]:4096 - splits[3]]))**2,
+                    np.abs(np.sum(data_np[splits[4]:splits[5]])  + np.sum(data_np[4096 - splits[5]:4096 - splits[4]]))**2,
+                    np.abs(np.sum(data_np[splits[5]:splits[6]])  + np.sum(data_np[4096 - splits[6]:4096 - splits[5]]))**2,
+                    np.abs(np.sum(data_np[splits[6]:splits[7]])  + np.sum(data_np[4096 - splits[7]:4096 - splits[6]]))**2,
                 ]
             m = max(m, np.max(d))
-            s = [max((s[i] * 0.05 +d[i]*0.95), d[i]) for i in range(8)]
+            
+            s = [max((s[i] * 0.8 +d[i]*0.2), d[i]) for i in range(8)]
 
             # l_channel = data_np[0::2]
             # # print(l_channel)
@@ -133,4 +138,4 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
         # Stop and close the stream 
         stream.stop_stream()
         stream.close()
-        print(get_splits(totals))
+        # print(get_splits(totals))
