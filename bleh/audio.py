@@ -41,7 +41,7 @@ def get_splits(d):
 
 # totals = {}
 #ToDo change to your device ID
-device_id = 3
+device_id = 5
 device_info = p.get_device_info_by_index(device_id)
 # channels = device_info["maxInputChannels"] if (device_info["maxOutputChannels"] < device_info["maxInputChannels"]) else device_info["maxOutputChannels"]
 # https://people.csail.mit.edu/hubert/pyaudio/docs/#pyaudio.Stream.__init__
@@ -60,14 +60,15 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
     print('\nRecording', device_id, '...\n')
     m = 1
     s = [0.0] * 8
-    l, r = [0.0] * 4, [0.0] * 4
+    # l, r = [0.0] * 4, [0.0] * 4
     # totals = {}
     # for i in range(chunk*2):
     #     totals[i] = 0
-    splits = [8, 16, 32, 64, 128, 256, 512, 1024] # [173, 714, 3634, 4096, 4559, 7479, 8018] # [250, 750, 1750, 3750, 6000, 7200, 8100]
+    splits = [0, 8, 16, 32, 64, 128, 256, 512, 1600] # [173, 714, 3634, 4096, 4559, 7479, 8018] # [250, 750, 1750, 3750, 6000, 7200, 8100]
     try:
         while True:
             while not stream.get_read_available():
+                time.sleep(2*1024.0/44100)
                 continue
             data = stream.read(chunk)
             data_np = np.frombuffer(data, dtype='h')
@@ -78,16 +79,19 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=9600, timeout=10) as ser
             # print(np.fft.fftfreq(8, data_np))
             # data_np 
             data_np = np.abs(data_np)
-            d = [
-                    np.abs(np.sum(data_np[:splits[0]]         )  + np.sum(data_np[4096-  splits[0]:]))**2,
-                    np.abs(np.sum(data_np[splits[0]:splits[1]])  + np.sum(data_np[4096 - splits[1]:4096 - splits[0]]))**2,
-                    np.abs(np.sum(data_np[splits[1]:splits[2]])  + np.sum(data_np[4096 - splits[2]:4096 - splits[1]]))**2,
-                    np.abs(np.sum(data_np[splits[2]:splits[3]])  + np.sum(data_np[4096 - splits[3]:4096 - splits[2]]))**2,
-                    np.abs(np.sum(data_np[splits[3]:splits[4]])  + np.sum(data_np[4096 - splits[4]:4096 - splits[3]]))**2,
-                    np.abs(np.sum(data_np[splits[4]:splits[5]])  + np.sum(data_np[4096 - splits[5]:4096 - splits[4]]))**2,
-                    np.abs(np.sum(data_np[splits[5]:splits[6]])  + np.sum(data_np[4096 - splits[6]:4096 - splits[5]]))**2,
-                    np.abs(np.sum(data_np[splits[6]:splits[7]])  + np.sum(data_np[4096 - splits[7]:4096 - splits[6]]))**2,
-                ]
+            # data_np = list(map(lambda x: x if x > 10 else 0, data_np))
+            data_np = np.cumsum(data_np)
+            d = [data_np[splits[i+1]]-data_np[splits[i]] + data_np[4095-splits[i]] - data_np[4095-splits[i+1]] for i in range(8)]
+            # d = [
+            #         (np.sum(data_np[:splits[0]],         )  + np.sum(data_np[4096-  splits[0]:]))**2,
+            #         (np.sum(data_np[splits[0]:splits[1]])  + np.sum(data_np[4096 - splits[1]:4096 - splits[0]]))**2,
+            #         (np.sum(data_np[splits[1]:splits[2]])  + np.sum(data_np[4096 - splits[2]:4096 - splits[1]]))**2,
+            #         (np.sum(data_np[splits[2]:splits[3]])  + np.sum(data_np[4096 - splits[3]:4096 - splits[2]]))**2,
+            #         (np.sum(data_np[splits[3]:splits[4]])  + np.sum(data_np[4096 - splits[4]:4096 - splits[3]]))**2,
+            #         (np.sum(data_np[splits[4]:splits[5]])  + np.sum(data_np[4096 - splits[5]:4096 - splits[4]]))**2,
+            #         (np.sum(data_np[splits[5]:splits[6]])  + np.sum(data_np[4096 - splits[6]:4096 - splits[5]]))**2,
+            #         (np.sum(data_np[splits[6]:splits[7]])  + np.sum(data_np[4096 - splits[7]:4096 - splits[6]]))**2,
+            #     ]
             m = max(m, np.max(d))
             
             s = [max((s[i] * 0.8 +d[i]*0.2), d[i]) for i in range(8)]
