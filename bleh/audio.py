@@ -5,15 +5,17 @@ import serial
 
 import pyaudio
 
-def remap(i):
-    if i < 4:
-        return i
-    return 7 - i
+h = 0.5             # hue change coefficient
+brightness = 128    # maximum brightness out of 0-255
+fade = 0.6          # how slowly to exponentially turn off lights [0.0 - 1.0]
+c = 1.3             # audio -> light intensity exponent (smoothing factor should be 1.0+)
+noise_gate = 0.01   # minimum signal to sum
 
-chunk = 1024 * 2 # Record in chunks of 1024 samples
-sample_format = pyaudio.paInt16
-channels = 2
-fs = 44100  # samples per second
+chunk = 1024 * 4 # Record in chunks of 1024 samples
+sample_format = pyaudio.paFloat32
+fs = 96000  # samples per second
+
+channels = 2 # stereo audio
 
 p = pyaudio.PyAudio()  # Create an interface to PortAudio
 
@@ -26,26 +28,22 @@ for i in range(0, p.get_device_count()):
 
 def get_splits(d):
     l = len(d)
-    vals = [d[k] for k in d]
-    s = sum(vals)/8
-    i = 0
-    f = 0
+    s = sum([d[k] for k in d])/8
+    i, f = 0, 0
     rtn = []
     while i < l:
         f += d[i]
         if f > s:
-            rtn.append(i - 1)
+            rtn.append(i)
             f = 0
         i += 1
-    return [0] + rtn + [2048]
+    return rtn + [chunk//2]
 
-# totals = {}
-#ToDo change to your device ID
-device_id = 5
+remap = lambda x: int(abs(7.5 - x))
+
+totals = {}
+device_id = 2
 device_info = p.get_device_info_by_index(device_id)
-# channels = device_info["maxInputChannels"] if (device_info["maxOutputChannels"] < device_info["maxInputChannels"]) else device_info["maxOutputChannels"]
-# https://people.csail.mit.edu/hubert/pyaudio/docs/#pyaudio.Stream.__init__
-# if "your mom":
 with serial.Serial(port='/dev/cu.usbmodem101', baudrate=115200, timeout=10) as ser:
     time.sleep(5)
     stream = p.open(format=sample_format,
@@ -57,109 +55,63 @@ with serial.Serial(port='/dev/cu.usbmodem101', baudrate=115200, timeout=10) as s
                     )
 
     base_hue = 0
-    print('\nRecording', device_id, '...\n')
     m = 1
     ls = [0.0] * 8
     rs = [0.0] * 8
-    # l, r = [0.0] * 4, [0.0] * 4
-    # totals = {}
-    # for i in range(chunk*2):
-    #     totals[i] = 0
-    bleh = lambda x : x if x > 10 else 0
-    splits = [0, 26, 96, 206, 349, 498, 662, 839, 2048]
-    splits = [int(x/2) for x in splits]
-    # splits =  # [0, 8, 16, 32, 64, 128, 256, 512, 1024] 
-    # splits = [sum(splits[0:i]) for i in range(1, 10)]
+    splits = [3, 7, 16, 28, 49, 104, 287, chunk//2]
     print(splits)
     totals = {}
-    for i in range(2048):
-        totals[i] = 0.0001
+    for i in range(chunk//2):
+        totals[i] = 0.0
     try:
         while True:
             while not stream.get_read_available():
-                time.sleep(1.0/44100)
+                time.sleep(0.2*chunk/fs)
             data = stream.read(chunk)
-            # while stream.get_read_available():
-            #     data = stream.read(chunk)
-            data_np = np.frombuffer(data, dtype='h')
+            data_np = np.frombuffer(data, dtype='f')
             l_np = data_np[0::2]
             r_np = data_np[1::2]
-            print(len(l_np))
             l_np = np.abs(np.fft.fft(l_np, axis=0))
             r_np = np.abs(np.fft.fft(r_np, axis=0))
-            # data_np = (np.fft.fft(data_np, axis=0))
-            # data_np = np.abs(data_np)
-            for i in range(1024):
-                totals[i] += (l_np[i] + l_np[2047-i] + r_np[i] + r_np[2047])
-            # l_np[l_np < 20] = 0
-            # r_np[r_np < 20] = 0
-            l_np = np.cumsum(l_np)
-            # print(l_np)
-            r_np = np.cumsum(r_np)
-            l = [(l_np[splits[i+1]]-l_np[splits[i]] + l_np[2047-splits[i]] - l_np[2047-splits[i+1]])**2 for i in range(8)]
-            r = [(r_np[splits[i+1]]-r_np[splits[i]] + r_np[2047-splits[i]] - r_np[2047-splits[i+1]])**2 for i in range(8)]
+            l_np[l_np < noise_gate] = 0
+            r_np[r_np < noise_gate] = 0
+            l = [0.0] * 8
+            r = [0.0] * 8
+            section = 0
+            for i in range(chunk//2):
+                if i > splits[section]:
+                    section += 1
+                totals[i] += (l_np[i] + l_np[chunk-1-i] + r_np[i] + r_np[chunk-1-i])
+                l[section] += l_np[i] + l_np[chunk-1-i]
+                r[section] += r_np[i] + r_np[chunk-1-i]
+            l = [x**c for x in l]
+            r = [x**c for x in r]
             m = max(m, np.max(r), np.max(l))
+            ls = [max((ls[i] * fade + l[i]* (1-fade)), l[i]) for i in range(8)]
+            rs = [max((rs[i] * fade + r[i]* (1-fade)), r[i]) for i in range(8)]
             
-            ls = [max((ls[i] * 0.7 + l[i]*0.3), l[i]) for i in range(8)]
-            rs = [max((rs[i] * 0.7 + r[i]*0.3), r[i]) for i in range(8)]
-
-            # l_channel = data_np[0::2]
-            # # print(l_channel)
-            # r_channel = data_np[1::2]
-            # l_channel = np.abs(np.fft.fft(l_channel, axis=0))
-            # dl = [
-            #         (np.sum(l_channel[0:256]))**1.2,
-            #         (np.sum(l_channel[256:2048]))**1.2,
-            #         (np.sum(l_channel[2048:3850]))**1.2,
-            #         (np.sum(l_channel[3850:]))**1.2
-            #     ]
-            # m = max(m, np.max(dl))
-            # l = [max((l[i] * 0.05 + dl[i]*0.95), dl[i]) for i in range(4)]
-
-            # r_channel = np.abs(np.fft.fft(r_channel, axis=0))
-            # dr = [
-            #         (np.sum(r_channel[0:256]))**1.2,
-            #         (np.sum(r_channel[256:2048]))**1.2,
-            #         (np.sum(r_channel[2048:3850]))**1.2,
-            #         (np.sum(r_channel[3850:]))**1.2
-            #     ]
-            # m = max(m, np.max(dr))
-            # r = [max((r[i] * 0.05 + dr[i]*0.95), dr[i]) for i in range(4)]
-            # print(len(r_channel))
-            
-            # for i in range(4)[::-1]:
-            #     l[i] = max(l[i] * 0.5, (max(l_channel[i], l_channel[i] * 0.5 + l[i] * 0.5)) - sum(l[i:]))
-            #     r[i] = max(r[i] * 0.5, (max(r_channel[i], r_channel[i] * 0.5 + r[i] * 0.5)) - sum(r[i:]))
-            # m = max(m, np.max(l), np.max(r))
-    
-
-            # l = [colorsys.hsv_to_rgb((base_hue + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(l)]
-            # r = [colorsys.hsv_to_rgb((base_hue + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(r)]
-            b = bytearray()
-            for x in [colorsys.hsv_to_rgb((base_hue+i*10.0/256)%1, 1.0, x*1.0/m) for i, x in enumerate(ls)]:
-                for rgb in x:
-                    b.append(int(128*rgb))
-            for x in [colorsys.hsv_to_rgb((base_hue+(8-i)*10.0/256)%1, 1.0, x*1.0/m) for i, x in enumerate(rs[::-1])]:
-                for rgb in x:
-                    b.append(int(128*rgb))
-            # for x in [colorsys.hsv_to_rgb((base_hue + 0.5 + (i/(15)))%1, 1.0, x*1.0/m) for i, x in enumerate(l[0:4])][::-1]:
-            #     for rgb in x:
-            #         b.append(int(64*rgb))
-            
-            t = time.time()
-            if ser.writable():
-                ser.write(b)
-            print(time.time()-t)
-            base_hue += 1.0/256
-            # if base_hue >= 1:
-            #     splits = [int(x/2) for x in get_splits(totals)]
+            base_hue += h*((max(r) + max(l))**3/(64*m**3))
             base_hue = base_hue % 1
-            print(get_splits(totals))
-            #     print(splits)
+
+            # convert to colors and emit to serial
+            b = bytearray()
+            for i, x in enumerate(rs + ls[::-1]):
+                color = colorsys.hsv_to_rgb((base_hue - remap(i)*5.0/256)%1, 1.0, x*1.0/m)
+                for rgb in color:
+                    b.append(int(brightness*rgb))
+            # for x in [colorsys.hsv_to_rgb((base_hue-i*5.0/256)%1, 1.0, x*1.0/m) for i, x in enumerate(rs)]:
+            #     for rgb in x:
+            #         b.append(int(brightness*rgb))
+            # for x in [colorsys.hsv_to_rgb((base_hue-(7-i)*5.0/256)%1, 1.0, x*1.0/m) for i, x in enumerate(ls[::-1])]:
+            #     for rgb in x:
+            #         b.append(int(brightness*rgb))
+
+            ser.write(b)
+            splits = get_splits(totals)
+
     finally:
         # Stop and close the stream 
         stream.stop_stream()
         stream.close()
-        # print(get_splits(totals))
+        print(get_splits(totals))
 
-        .0001201629638671875
